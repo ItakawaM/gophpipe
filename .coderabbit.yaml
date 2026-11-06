@@ -8,12 +8,18 @@ chat:
   art: false
 
 tone_instructions: >-
-# Your tone_instructions
+  You are an expert Go and distributed-systems reviewer.
+  Reply formal, concise: flag concrete issues, each with a possible resolution;
+  no praise or diff restatement.
 
 reviews:
   profile: chill
   high_level_summary_instructions: >-
-  # Your high_level_summary_instructions
+    Write a concise summary for reviewers.
+        1. Start with a 1-2 sentence summary of the technical goal.
+        2. Group the changes into bulleted categories: Features, Fixes, Refactoring, and Chores.
+        3. Also explicitly flag: wire-breaking protobuf changes (field number reuse or renumbering, type changes, removed fields without `reserved`, edits to a released vN package); new or changed task types; changes to mangos socket topology, addresses, or deadlines; changes to the REST endpoint contract or the Teams payload; and bumps to the go.mod `go` directive or pinned tool versions (buf, protoc-gen-go, golangci-lint).
+        4. Do NOT list file-by-file changes (the walkthrough covers that). Keep it high-level.
   high_level_summary_in_walkthrough: true
 
   poem: false
@@ -30,13 +36,74 @@ reviews:
   path_filters:
     - "!**/*.pb.go"
     - "!**/go.sum"
-    - "!**/go.mod"
     - "!**/gen/**"
 
   path_instructions:
     - path: "**/*.go"
       instructions: |
-      # Your path_instructions for **/*.go
+        Review this Go code for correctness, idiomatic style, security, and performance. Target toolchain is Go 1.27.x (assume `go 1.27` in go.mod). Specifically:
+        - Flag unhandled or silently discarded errors; wrap with `fmt.Errorf("...: %w", err)`; use `errors.Is` and `errors.AsType[T]` (1.26+), never string-matching
+        - Every goroutine needs a clear exit path (context, closed channel, or WaitGroup); prefer `sync.WaitGroup.Go`; use `context.WithCancelCause`/`context.AfterFunc` where they simplify cancellation
+        - Prefer explicit, readable control flow over clever abstractions
+        - Exported identifiers need doc comments starting with the identifier name
+        - Note allocations in hot paths (worker receive loop): needless copies, string concatenation in loops
+
+        Modern Go (suggest only when it simplifies the code; no churn on unrelated lines):
+        - `for i := range n`, `min`/`max`/`clear`, `slices`/`maps`/`cmp` helpers, `strings.FieldsSeq`/`SplitSeq`
+        - `new(expr)` (1.26+) for optional proto3 fields; typed atomics; `sync.OnceValue(s)`
+        - `log/slog` instead of `log.Printf`/`fmt.Println`
+        - `encoding/json` is v2-backed in 1.27: prefer `omitzero` where zero-value omission is intended
+        - Pin dev tools (buf, protoc-gen-go, golangci-lint) with `tool` directives in go.mod
+        - Do not use stdlib symbols newer than the go.mod `go` directive; mention applicable `go fix` modernizers
+
+    - path: "**/*.go"
+      instructions: |
+        mangos pipeline checks. Apply only to files importing go.nanomsg.org/mangos/v3.
+        - PUSH round-robins and blocks when no PULL peer is ready: set `OptionSendDeadline`/`OptionRecvDeadline` and handle `mangos.ErrClosed` and timeouts distinctly via `errors.Is`
+        - Stable endpoints (master, sink) listen; workers dial. Configure reconnect behaviour; never assume a peer is connected at startup
+        - Bound inbound size (`OptionMaxRecvSize`); unmarshal with `proto.Unmarshal` and validate before processing
+        - Backpressure: bounded concurrency per worker, no goroutine per message without a limit
+        - Shutdown: stop ingress first, drain in-flight work, then close sockets; `Close` on every path
+
+    - path: "**/*.go"
+      instructions: |
+        HTTP checks. Apply only to files importing net/http (REST ingress and Teams webhook sink).
+        Ingress:
+        - `http.Server` with explicit `ReadHeaderTimeout`/`ReadTimeout`/`WriteTimeout`/`IdleTimeout`; `Shutdown` on exit
+        - Limit bodies with `http.MaxBytesReader`; strict JSON decoding; validate input at the boundary
+        - Correct status codes (e.g. 202 for queued work); never leak internal errors to clients
+        Sink:
+        - Dedicated `http.Client` with timeout, never `http.DefaultClient`; `NewRequestWithContext`; close and drain response bodies
+        - Retry only 429/5xx with backoff, honouring `Retry-After`
+        - The webhook URL is a secret: load from env/config, never log it
+        - Flag legacy Office 365 connector `MessageCard` payloads; Teams Workflows webhooks expect Adaptive Cards
+
+    - path: "**/*.proto"
+      instructions: |
+        Review against Buf STANDARD lint rules and wire compatibility. Treat compatibility violations as high severity:
+        - Directory must match package (`pipeline.v1` in proto/pipeline/v1/); do not hand-set `go_package` if buf managed mode is enabled
+        - Never reuse or renumber field numbers or change a field's type or cardinality; removed fields need `reserved` for number and name
+        - Enums: first value `<ENUM_NAME>_UNSPECIFIED = 0`, values prefixed by the enum name
+        - Task envelope: use a `oneof` for task payloads so new task types are additive
+        - Use `google.protobuf.Timestamp`/`Duration`; opaque string IDs
+        - Bound `string`/`bytes`/`repeated` sizes with `buf.validate`; mark secrets with `[debug_redact = true]`
+        - Every message, field, and enum value needs a doc comment
+
+    - path: "**/*_test.go"
+      instructions: |
+        Review this Go test code. Specifically:
+        - Use `t.Context()`, `t.Cleanup`, `b.Loop()`; table-driven tests with `t.Run`, `t.Parallel()` where safe
+        - Deadlines, retries, and backoff should use `testing/synctest` instead of real sleeps
+        - Use mangos `inproc://` transport for socket tests and `httptest.Server` for the Teams sink; cover timeouts, peer-unavailable, and shutdown paths
+        - Tests should pass under `-race`
+
+    - path: "**/buf*.yaml"
+      instructions: |
+        Check buf v2 config: STANDARD lint and FILE breaking rules enabled, managed mode sets `go_package`, plugins pinned, output under the excluded gen/ directory.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Check actions are pinned to a full commit SHA, `permissions` are least-privilege, and secrets cannot reach untrusted `pull_request` contexts.
 
   auto_review:
     enabled: true
@@ -55,6 +122,10 @@ reviews:
     # Go linting runs in CI only (pinned version, same config).
     golangci-lint:
       enabled: false
+
+    # Protobuf
+    buf:
+      enabled: true
 
     # GitHub Actions
     actionlint:
@@ -76,6 +147,12 @@ reviews:
 
     # Dependencies
     osvScanner:
+      enabled: true
+
+    # Config / docs
+    yamllint:
+      enabled: true
+    markdownlint:
       enabled: true
 
     languagetool:
