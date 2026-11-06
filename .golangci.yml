@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+
+  enable:
+    - bodyclose
+    - durationcheck
+    - errorlint
+    - nilerr
+    - noctx
+    - copyloopvar
+    - gosec
+    - gocritic
+    - misspell
+    - nolintlint
+    - revive
+    - unconvert
+    - usestdlibvars
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+
+    gosec:
+      excludes:
+        - G104
+
+    misspell:
+      locale: US
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+
+  exclusions:
+    warn-unused: true
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - errcheck
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      rewrite-rules:
+        - pattern: "interface{}"
+          replacement: "any"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://json.schemastore.org/codecov.json
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+#
+#  individual_components:
+#    - component_id: id_1
+#      name: Name 1
+#      paths:
+#        - path_1/**
+#      statuses:
+#        - type: project
+#          target: 95%
+#
+#    - component_id: id_2
+#      name: Name 2
+#      paths:
+#        - path_2/**

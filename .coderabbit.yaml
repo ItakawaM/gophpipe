@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# https://docs.coderabbit.ai/reference/configuration
+language: "en-US"
+early_access: false
+
+chat:
+  auto_reply: true
+  art: false
+
+tone_instructions: >-
+# Your tone_instructions
+
+reviews:
+  profile: chill
+  high_level_summary_instructions: >-
+  # Your high_level_summary_instructions
+  high_level_summary_in_walkthrough: true
+
+  poem: false
+  in_progress_fortune: false
+
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  enable_prompt_for_ai_agents: false
+
+  path_filters:
+    - "!**/*.pb.go"
+    - "!**/go.sum"
+    - "!**/go.mod"
+    - "!**/gen/**"
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+      # Your path_instructions for **/*.go
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: false
+    ignore_usernames:
+      - "dependabot[bot]"
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "off"
+
+  tools:
+    # Go linting runs in CI only (pinned version, same config).
+    golangci-lint:
+      enabled: false
+
+    # GitHub Actions
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+
+    # Secrets
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+
+    # SAST
+    semgrep:
+      enabled: true
+    opengrep:
+      enabled: true
+
+    # Dependencies
+    osvScanner:
+      enabled: true
+
+    languagetool:
+      enabled: true
+      level: default
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
