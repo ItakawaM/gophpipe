@@ -9,8 +9,8 @@ chat:
 
 tone_instructions: >-
   You are an expert Go and distributed-systems reviewer.
-  Reply formal, concise: flag concrete issues, each with a possible resolution;
-  no praise or diff restatement.
+  Be formal and concise: flag concrete issues, each with a suggested fix.
+  No praise, no restating the diff.
 
 reviews:
   profile: chill
@@ -18,7 +18,11 @@ reviews:
     Write a concise summary for reviewers.
         1. Start with a 1-2 sentence summary of the technical goal.
         2. Group the changes into bulleted categories: Features, Fixes, Refactoring, and Chores.
-        3. Also explicitly flag: wire-breaking protobuf changes (field number reuse or renumbering, type changes, removed fields without `reserved`, edits to a released vN package); new or changed task types; changes to mangos socket topology, addresses, or deadlines; changes to the REST endpoint contract or the Teams payload; and bumps to the go.mod `go` directive or pinned tool versions (buf, protoc-gen-go, golangci-lint).
+        3. Explicitly flag, if present: wire-breaking protobuf changes (field number reuse or renumbering,
+           type or cardinality changes, removed fields without `reserved`, edits to a released vN package);
+           new or changed message/job types; changes to socket topology (protocols, listen/dial roles,
+           addresses, deadlines, queue lengths); changes to the public HTTP API contract (routes, status
+           codes, request/response schemas); and bumps to the go.mod `go` directive, mangos, or pinned tools.
         4. Do NOT list file-by-file changes (the walkthrough covers that). Keep it high-level.
   high_level_summary_in_walkthrough: true
 
@@ -37,73 +41,142 @@ reviews:
     - "!**/*.pb.go"
     - "!**/go.sum"
     - "!**/gen/**"
+    - "!**/vendor/**"
 
   path_instructions:
     - path: "**/*.go"
       instructions: |
-        Review this Go code for correctness, idiomatic style, security, and performance. Target toolchain is Go 1.27.x (assume `go 1.27` in go.mod). Specifically:
-        - Flag unhandled or silently discarded errors; wrap with `fmt.Errorf("...: %w", err)`; use `errors.Is` and `errors.AsType[T]` (1.26+), never string-matching
-        - Every goroutine needs a clear exit path (context, closed channel, or WaitGroup); prefer `sync.WaitGroup.Go`; use `context.WithCancelCause`/`context.AfterFunc` where they simplify cancellation
-        - Prefer explicit, readable control flow over clever abstractions
+        Review for correctness, idiomatic style, security, and performance. Assume the Go version from
+        the go.mod `go` directive (currently 1.27.x); never suggest stdlib symbols newer than it.
+        Errors:
+        - Flag unhandled or silently discarded errors (including `Close`, `Flush`, `Write`)
+        - Wrap with `fmt.Errorf("op: %w", err)`; match with `errors.Is` / `errors.AsType[T]`, never strings
+        - Sentinel errors as package-level `var ErrX = errors.New(...)`; don't panic on recoverable errors
+        Concurrency:
+        - Every goroutine has a clear owner and exit path (context, closed channel, or WaitGroup);
+          prefer `sync.WaitGroup.Go` or `errgroup.Group` with `SetLimit`
+        - `context.Context` is the first parameter, never stored in structs; propagate it, don't
+          replace with `context.Background()` mid-call-chain
+        - Use `context.WithCancelCause` / `context.Cause` / `context.AfterFunc` where they simplify cancellation
+        - Typed atomics (`atomic.Int64`, `atomic.Pointer[T]`) over `atomic.AddInt64` on raw fields;
+          no copying of structs containing mutexes/atomics
+        - `sync.OnceValue`/`OnceValues` over hand-rolled `sync.Once` + package vars
+        Style:
+        - Explicit, readable control flow over clever abstractions; accept interfaces, return structs;
+          define interfaces at the consumer
         - Exported identifiers need doc comments starting with the identifier name
-        - Note allocations in hot paths (worker receive loop): needless copies, string concatenation in loops
-
-        Modern Go (suggest only when it simplifies the code; no churn on unrelated lines):
-        - `for i := range n`, `min`/`max`/`clear`, `slices`/`maps`/`cmp` helpers, `strings.FieldsSeq`/`SplitSeq`
-        - `new(expr)` (1.26+) for optional proto3 fields; typed atomics; `sync.OnceValue(s)`
-        - `log/slog` instead of `log.Printf`/`fmt.Println`
-        - `encoding/json` is v2-backed in 1.27: prefer `omitzero` where zero-value omission is intended
-        - Pin dev tools (buf, protoc-gen-go, golangci-lint) with `tool` directives in go.mod
-        - Do not use stdlib symbols newer than the go.mod `go` directive; mention applicable `go fix` modernizers
-
-    - path: "**/*.go"
-      instructions: |
-        mangos pipeline checks. Apply only to files importing go.nanomsg.org/mangos/v3.
-        - PUSH round-robins and blocks when no PULL peer is ready: set `OptionSendDeadline`/`OptionRecvDeadline` and handle `mangos.ErrClosed` and timeouts distinctly via `errors.Is`
-        - Stable endpoints (master, sink) listen; workers dial. Configure reconnect behaviour; never assume a peer is connected at startup
-        - Bound inbound size (`OptionMaxRecvSize`); unmarshal with `proto.Unmarshal` and validate before processing
-        - Backpressure: bounded concurrency per worker, no goroutine per message without a limit
-        - Shutdown: stop ingress first, drain in-flight work, then close sockets; `Close` on every path
+        - `log/slog` with structured attributes instead of `log.Printf`/`fmt.Println`; no secrets in logs
+        - Configuration via explicit structs/options, not package-level mutable globals
+        Performance (hot paths, e.g. receive/dispatch loops):
+        - Flag needless allocations and copies, string concatenation in loops, unbounded slice growth,
+          `fmt.Sprintf` for simple conversions (use `strconv`)
+        Modern Go (suggest only when it simplifies the touched code; no churn on unrelated lines):
+        - `for i := range n`, `min`/`max`/`clear`, `slices`/`maps`/`cmp`, iterators (`iter.Seq`),
+          `strings.SplitSeq`/`FieldsSeq`, `new(expr)` for pointer-to-value (e.g. optional proto3 fields)
+        - New code may import `encoding/json/v2` for its stricter defaults; `encoding/json` is v2-backed
+          in 1.27, so don't assert on JSON error message text; prefer `omitzero` over `omitempty` where
+          zero-value omission is intended
+        - Pin dev tools (buf, protoc-gen-go, golangci-lint, etc.) with `tool` directives in go.mod
+        - Point out applicable `go fix` modernizers instead of hand-editing many call sites
 
     - path: "**/*.go"
       instructions: |
-        HTTP checks. Apply only to files importing net/http (REST ingress and Teams webhook sink).
-        Ingress:
-        - `http.Server` with explicit `ReadHeaderTimeout`/`ReadTimeout`/`WriteTimeout`/`IdleTimeout`; `Shutdown` on exit
-        - Limit bodies with `http.MaxBytesReader`; strict JSON decoding; validate input at the boundary
-        - Correct status codes (e.g. 202 for queued work); never leak internal errors to clients
-        Sink:
-        - Dedicated `http.Client` with timeout, never `http.DefaultClient`; `NewRequestWithContext`; close and drain response bodies
-        - Retry only 429/5xx with backoff, honouring `Retry-After`
-        - The webhook URL is a secret: load from env/config, never log it
-        - Flag legacy Office 365 connector `MessageCard` payloads; Teams Workflows webhooks expect Adaptive Cards
+        mangos checks. Apply only to files importing go.nanomsg.org/mangos/v3.
+        Topology and delivery semantics:
+        - Stable endpoints (master/broker, collectors) `Listen`; ephemeral peers (workers) `Dial`.
+          Workers must not assume the master is up: use `mangos.OptionDialAsynch` and set
+          `OptionReconnectTime` / `OptionMaxReconnectTime`
+        - Delivery is at-least-once via app-level ACKs on top of PUSH/PULL: check that every job
+          carries a stable ID, ACKs are sent only after the work's side effects are durable,
+          unACKed jobs are redelivered after a timeout, and workers dedupe by job ID
+          (idempotent handling, bounded/expiring dedupe state)
+        - PUSH load-balances across ready peers and blocks when none is ready: every send path needs
+          `OptionSendDeadline`; every receive loop needs `OptionRecvDeadline` or a context-driven close
+        - Handle `mangos.ErrClosed`, `mangos.ErrSendTimeout`, `mangos.ErrRecvTimeout` distinctly via
+          `errors.Is`; a timeout is retryable/backpressure, `ErrClosed` ends the loop
+        - Queue sizing (`OptionWriteQLen`/`OptionReadQLen`) must be deliberate, not left implicit when
+          throughput matters
+        Safety and resources:
+        - Bound inbound size with `OptionMaxRecvSize`; `proto.Unmarshal` then validate before processing
+        - Sockets are safe for concurrent use, but don't share one `*mangos.Message` across goroutines;
+          when using `SendMsg`/`RecvMsg`, ownership passes on send, and received messages should be
+          `Free()`d after use in hot loops
+        - Bounded concurrency per worker (semaphore / `errgroup.SetLimit`); never a goroutine per
+          message without a limit
+        - Addresses and transports (`tcp://`, `ipc://`, `inproc://`) come from configuration, not literals;
+          consider TLS (`tls+tcp://`) for traffic leaving the host
+        - Shutdown order: stop ingress, drain in-flight work within a deadline, then `Close` sockets;
+          `Close` on every path, including errors during setup
+
+    - path: "**/*.go"
+      instructions: |
+        net/http checks. Apply only to files importing net/http.
+        Server:
+        - `http.Server` with explicit `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`,
+          `MaxHeaderBytes`; never `http.ListenAndServe` with the zero-value server in production code
+        - Graceful exit: `Shutdown(ctx)` with a deadline on SIGINT/SIGTERM (`signal.NotifyContext`);
+          treat `http.ErrServerClosed` as normal
+        - Use a dedicated `http.ServeMux` (not `DefaultServeMux`) with method/path patterns
+          (`"POST /jobs"`, `r.PathValue("id")`)
+        - Use the request context for downstream work; don't start detached goroutines that outlive
+          the request unless ownership is explicit
+        Input and output:
+        - Limit bodies with `http.MaxBytesReader` (map `*http.MaxBytesError` to 413); check
+          `Content-Type` (415); strict decoding that rejects unknown fields explicitly
+          (v1 `Decoder.DisallowUnknownFields`, or v2 `json.RejectUnknownMembers(true)`, which is NOT the
+          v2 default) and rejects trailing data; validate at the boundary
+        - Correct status codes: 202 Accepted (with job ID / `Location`) for queued work, 400/422 for
+          invalid input, 503 + `Retry-After` when the queue/backend is saturated (e.g. send timeout)
+        - Never leak internal errors or stack traces to clients; log them with request context instead
+        - Set headers (e.g. `Content-Type`) before `WriteHeader`/first `Write`; handle or log errors
+          from `Write` and response encoding (headers are already sent, so log rather than re-respond)
+        - Middleware (recovery, request ID, logging, limits) composed explicitly and in a sensible order
+        Client (if any outbound calls):
+        - Shared `http.Client` with a `Timeout` or per-request context deadline; never `http.DefaultClient`
+        - Always close response bodies; check status codes before decoding
 
     - path: "**/*.proto"
       instructions: |
-        Review against Buf STANDARD lint rules and wire compatibility. Treat compatibility violations as high severity:
-        - Directory must match package (`pipeline.v1` in proto/pipeline/v1/); do not hand-set `go_package` if buf managed mode is enabled
-        - Never reuse or renumber field numbers or change a field's type or cardinality; removed fields need `reserved` for number and name
-        - Enums: first value `<ENUM_NAME>_UNSPECIFIED = 0`, values prefixed by the enum name
-        - Task envelope: use a `oneof` for task payloads so new task types are additive
+        Review against Buf STANDARD lint rules and wire compatibility. Treat compatibility violations as
+        high severity:
+        - Directory must match package (e.g. `foo.v1` in proto/foo/v1/); do not hand-set `go_package`
+          if buf managed mode is enabled
+        - Never reuse or renumber field numbers or change a field's type or cardinality; removed fields
+          need `reserved` for both number and name
+        - Enums: first value `<ENUM_NAME>_UNSPECIFIED = 0`, values prefixed with the enum name
+        - Message envelopes: use a `oneof` for payload variants so new types are additive
         - Use `google.protobuf.Timestamp`/`Duration`; opaque string IDs
         - Bound `string`/`bytes`/`repeated` sizes with `buf.validate`; mark secrets with `[debug_redact = true]`
         - Every message, field, and enum value needs a doc comment
 
     - path: "**/*_test.go"
       instructions: |
-        Review this Go test code. Specifically:
-        - Use `t.Context()`, `t.Cleanup`, `b.Loop()`; table-driven tests with `t.Run`, `t.Parallel()` where safe
-        - Deadlines, retries, and backoff should use `testing/synctest` instead of real sleeps
-        - Use mangos `inproc://` transport for socket tests and `httptest.Server` for the Teams sink; cover timeouts, peer-unavailable, and shutdown paths
-        - Tests should pass under `-race`
+        Review Go test code:
+        - Table-driven tests with `t.Run`; `t.Parallel()` where safe; `t.Helper()` in helpers
+        - `t.Context()`, `t.Cleanup`, `t.TempDir()`, `t.Setenv`; `b.Loop()` in benchmarks
+        - Timeouts, deadlines, retries, and backoff logic use `testing/synctest` (`synctest.Test`) when
+          all I/O inside the bubble is in-memory (`net.Pipe`, fakes, channels); real network I/O
+          (`httptest.NewServer`, TCP) doesn't count as durably blocked, so fake time won't advance.
+          Integration tests over real sockets may use real time with short, bounded timeouts.
+          Flag `time.Sleep` used for synchronisation in either case
+        - mangos: use the `inproc://` transport with unique addresses per test; cover send/recv timeouts,
+          peer unavailable at startup, peer reconnect, and shutdown/drain paths
+        - net/http: `httptest.NewRecorder` for handlers, `httptest.NewServer` for clients; cover oversized
+          bodies, bad content types, malformed JSON, and saturation (503) responses
+        - Compare structs/protos with `cmp.Diff` (+ `protocmp.Transform()`), not `reflect.DeepEqual`
+        - Fuzz targets (`testing.F`) for decoders/validators at trust boundaries
+        - Tests must pass under `-race` and leave no leaked goroutines
 
     - path: "**/buf*.yaml"
       instructions: |
-        Check buf v2 config: STANDARD lint and FILE breaking rules enabled, managed mode sets `go_package`, plugins pinned, output under the excluded gen/ directory.
+        Check buf v2 config: STANDARD lint and FILE breaking rules enabled, managed mode sets `go_package`,
+        plugins pinned, output under the excluded gen/ directory.
 
     - path: ".github/workflows/**"
       instructions: |
-        Check actions are pinned to a full commit SHA, `permissions` are least-privilege, and secrets cannot reach untrusted `pull_request` contexts.
+        Check actions are pinned to a full commit SHA, `permissions` are least-privilege, and secrets cannot
+        reach untrusted `pull_request` contexts. Go jobs should use the go.mod toolchain version and run
+        tests with `-race`.
 
   auto_review:
     enabled: true
