@@ -122,12 +122,14 @@ reviews:
           the request unless ownership is explicit
         Input and output:
         - Limit bodies with `http.MaxBytesReader` (map `*http.MaxBytesError` to 413); check
-          `Content-Type` (415); strict decoding (`DisallowUnknownFields` or json/v2 defaults, reject
-          trailing data); validate at the boundary
+          `Content-Type` (415); strict decoding that rejects unknown fields explicitly
+          (v1 `Decoder.DisallowUnknownFields`, or v2 `json.RejectUnknownMembers(true)`, which is NOT the
+          v2 default) and rejects trailing data; validate at the boundary
         - Correct status codes: 202 Accepted (with job ID / `Location`) for queued work, 400/422 for
           invalid input, 503 + `Retry-After` when the queue/backend is saturated (e.g. send timeout)
         - Never leak internal errors or stack traces to clients; log them with request context instead
-        - Set `Content-Type` before `WriteHeader`; don't write after `WriteHeader` errors silently
+        - Set headers (e.g. `Content-Type`) before `WriteHeader`/first `Write`; handle or log errors
+          from `Write` and response encoding (headers are already sent, so log rather than re-respond)
         - Middleware (recovery, request ID, logging, limits) composed explicitly and in a sensible order
         Client (if any outbound calls):
         - Shared `http.Client` with a `Timeout` or per-request context deadline; never `http.DefaultClient`
@@ -152,8 +154,11 @@ reviews:
         Review Go test code:
         - Table-driven tests with `t.Run`; `t.Parallel()` where safe; `t.Helper()` in helpers
         - `t.Context()`, `t.Cleanup`, `t.TempDir()`, `t.Setenv`; `b.Loop()` in benchmarks
-        - Timeouts, deadlines, retries, and backoff use `testing/synctest` (`synctest.Test`) instead of
-          real sleeps; flag `time.Sleep` used for synchronisation
+        - Timeouts, deadlines, retries, and backoff logic use `testing/synctest` (`synctest.Test`) when
+          all I/O inside the bubble is in-memory (`net.Pipe`, fakes, channels); real network I/O
+          (`httptest.NewServer`, TCP) doesn't count as durably blocked, so fake time won't advance.
+          Integration tests over real sockets may use real time with short, bounded timeouts.
+          Flag `time.Sleep` used for synchronisation in either case
         - mangos: use the `inproc://` transport with unique addresses per test; cover send/recv timeouts,
           peer unavailable at startup, peer reconnect, and shutdown/drain paths
         - net/http: `httptest.NewRecorder` for handlers, `httptest.NewServer` for clients; cover oversized
