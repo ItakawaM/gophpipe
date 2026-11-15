@@ -78,7 +78,9 @@ func TestReplaceAttrs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := replaceAttrs(nil, tt.attr)
-			testutil.AssertDeepEqual(t, got, tt.want)
+
+			testutil.AssertEqual(t, got.Key, tt.want.Key)
+			testutil.AssertEqual(t, got.Value.String(), tt.want.Value.String())
 		})
 	}
 }

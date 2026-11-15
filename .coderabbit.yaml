@@ -71,7 +71,7 @@ reviews:
         - Flag needless allocations and copies, string concatenation in loops, unbounded slice growth,
           `fmt.Sprintf` for simple conversions (use `strconv`)
         Modern Go (suggest only when it simplifies the touched code; no churn on unrelated lines):
-        - `for i := range n`, `min`/`max`/`clear`, `slices`/`maps`/`cmp`, iterators (`iter.Seq`),
+        - `for i := range n`, `min`/`max`/`clear`, `slices`/`maps`, iterators (`iter.Seq`),
           `strings.SplitSeq`/`FieldsSeq`, `new(expr)` for pointer-to-value (e.g. optional proto3 fields)
         - New code may import `encoding/json/v2` for its stricter defaults; `encoding/json` is v2-backed
           in 1.27, so don't assert on JSON error message text; prefer `omitzero` over `omitempty` where
@@ -163,7 +163,6 @@ reviews:
           peer unavailable at startup, peer reconnect, and shutdown/drain paths
         - net/http: `httptest.NewRecorder` for handlers, `httptest.NewServer` for clients; cover oversized
           bodies, bad content types, malformed JSON, and saturation (503) responses
-        - Compare structs/protos with `cmp.Diff` (+ `protocmp.Transform()`), not `reflect.DeepEqual`
         - Fuzz targets (`testing.F`) for decoders/validators at trust boundaries
         - Tests must pass under `-race` and leave no leaked goroutines
 
