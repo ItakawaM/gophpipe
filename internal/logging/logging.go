@@ -89,6 +89,6 @@ func (l *Logger) Fatal(msg string, args ...any) {
 
 // FatalContext logs at LevelFatal with the given context.
 func (l *Logger) FatalContext(ctx context.Context, msg string, args ...any) {
-	l.Logger.Log(ctx, LevelFatal, msg, args...)
+	l.Log(ctx, LevelFatal, msg, args...)
 	l.exit(1)
 }
