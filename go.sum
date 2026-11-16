@@ -1,0 +1,4 @@
+go.nanomsg.org/mangos/v3 v3.6.0 h1:ITqOcUO4I6JcdUjtf372Mf72M+8famfc80J3Vlb24Rg=
+go.nanomsg.org/mangos/v3 v3.6.0/go.mod h1:V/hunJy3SeNIWRmypkhM8kvWrI5IYvNfK5TPM/FO1sU=
+google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
+google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
