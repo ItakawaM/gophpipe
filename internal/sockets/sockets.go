@@ -72,7 +72,7 @@ func SendMessage(sock protocol.Socket, message proto.Message) error {
 //
 // It returns ErrInvalidMessage on an unmarshal error (example: invalid utf-8 string).
 // It returns mangos.ErrProtoOp if the socket cannot Recv.
-// It returns mangos.ErrSendTimeout on a timeout.
+// It returns mangos.ErrRecvTimeout on a timeout.
 // It returns mangos.ErrClosed if the socket is closed.
 func ReceiveMessage(sock protocol.Socket, dst proto.Message) error {
 	data, err := sock.Recv()

@@ -2,6 +2,7 @@ package sockets
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pb "github.com/ItakawaM/gophpipe/gen/go/testutil/v1"
@@ -59,7 +60,11 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.newSock, tt.opts...)
+			sock, err := New(tt.newSock, tt.opts...)
+			if err == nil {
+				Close(sock)
+			}
+
 			testutil.AssertError(t, err, tt.err)
 		})
 	}
@@ -82,11 +87,12 @@ func TestClose(t *testing.T) {
 // TestSendMessage tests message sending and marshaling.
 func TestSendMessage(t *testing.T) {
 	tests := []struct {
-		name    string
-		newSock SocketFunc
-		opts    []Option
-		message proto.Message
-		err     error
+		name        string
+		newSock     SocketFunc
+		opts        []Option
+		message     proto.Message
+		wantElapsed time.Duration
+		err         error
 	}{
 		{
 			name:    "message queued",
@@ -116,8 +122,9 @@ func TestSendMessage(t *testing.T) {
 			newSock: push.NewSocket,
 			opts: []Option{
 				{
-					Key:   mangos.OptionSendDeadline,
-					Value: 1 * time.Millisecond,
+					Key: mangos.OptionSendDeadline,
+					// fake time is used
+					Value: 5 * time.Second,
 				},
 				{
 					Key:   mangos.OptionWriteQLen,
@@ -127,20 +134,27 @@ func TestSendMessage(t *testing.T) {
 			message: &pb.Dummy{
 				Data: "123",
 			},
-			err: mangos.ErrSendTimeout,
+			wantElapsed: 5 * time.Second,
+			err:         mangos.ErrSendTimeout,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sock, err := New(tt.newSock, tt.opts...)
-			if err != nil {
-				t.Fatalf("New() = %v", err)
-			}
-			defer Close(sock)
+			synctest.Test(t, func(t *testing.T) {
+				sock, err := New(tt.newSock, tt.opts...)
+				if err != nil {
+					t.Fatalf("New() = %v", err)
+				}
+				defer Close(sock)
 
-			err = SendMessage(sock, tt.message)
-			testutil.AssertError(t, err, tt.err)
+				start := time.Now()
+
+				err = SendMessage(sock, tt.message)
+				testutil.AssertError(t, err, tt.err)
+				testutil.AssertEqual(t, time.Since(start), tt.wantElapsed)
+
+			})
 		})
 	}
 
@@ -157,13 +171,14 @@ func TestSendMessage(t *testing.T) {
 	})
 }
 
-// TestReceiveMessageErrors tests ReceiveMessage errors.
-func TestReceiveMessageErrors(t *testing.T) {
+// TestReceiveMessage tests ReceiveMessage errors.
+func TestReceiveMessage(t *testing.T) {
 	tests := []struct {
-		name    string
-		newSock SocketFunc
-		opts    []Option
-		err     error
+		name        string
+		newSock     SocketFunc
+		opts        []Option
+		wantElapsed time.Duration
+		err         error
 	}{
 		{
 			name:    "invalid socket",
@@ -177,28 +192,30 @@ func TestReceiveMessageErrors(t *testing.T) {
 			opts: []Option{
 				{
 					Key:   mangos.OptionRecvDeadline,
-					Value: 1 * time.Millisecond,
-				},
-				{
-					Key:   mangos.OptionReadQLen,
-					Value: 0,
+					Value: 5 * time.Second,
 				},
 			},
-			err: mangos.ErrRecvTimeout,
+			wantElapsed: 5 * time.Second,
+			err:         mangos.ErrRecvTimeout,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sock, err := New(tt.newSock, tt.opts...)
-			if err != nil {
-				t.Fatalf("New() = %v", err)
-			}
-			defer Close(sock)
+			synctest.Test(t, func(t *testing.T) {
+				sock, err := New(tt.newSock, tt.opts...)
+				if err != nil {
+					t.Fatalf("New() = %v", err)
+				}
+				defer Close(sock)
 
-			var dummy pb.Dummy
-			err = ReceiveMessage(sock, &dummy)
-			testutil.AssertError(t, err, tt.err)
+				start := time.Now()
+
+				var dummy pb.Dummy
+				err = ReceiveMessage(sock, &dummy)
+				testutil.AssertError(t, err, tt.err)
+				testutil.AssertEqual(t, time.Since(start), tt.wantElapsed)
+			})
 		})
 	}
 
