@@ -214,3 +214,53 @@ func TestReceiveMessageErrors(t *testing.T) {
 		testutil.AssertError(t, err, mangos.ErrClosed)
 	})
 }
+
+// TestSockets tests that ReceiveMessage correctly receives
+// the message SendMessage sends.
+func TestSockets(t *testing.T) {
+	tests := []struct {
+		name    string
+		message *pb.Dummy
+	}{
+		{
+			name: "full flow",
+			message: &pb.Dummy{
+				Data: "hello world",
+			},
+		},
+		{
+			name:    "nil message",
+			message: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender, receiver := newPair(t, push.NewSocket, pull.NewSocket)
+
+			if err := SendMessage(sender, tt.message); err != nil {
+				t.Fatalf("SendMessage() = %v", err)
+			}
+
+			var out pb.Dummy
+			if err := ReceiveMessage(receiver, &out); err != nil {
+				t.Fatalf("ReceiveMessage() = %v", err)
+			}
+
+			testutil.AssertEqual(t, out.GetData(), tt.message.GetData())
+		})
+	}
+
+	// separate case for receiving an invalid proto message
+	t.Run("invalid message", func(t *testing.T) {
+		sender, receiver := newPair(t, push.NewSocket, pull.NewSocket)
+
+		if err := sender.Send([]byte{0xF0, 0x90, 0x8D}); err != nil {
+			t.Fatalf("Send() = %v", err)
+		}
+
+		var out pb.Dummy
+		err := ReceiveMessage(receiver, &out)
+		testutil.AssertError(t, err, ErrInvalidMessage)
+	})
+}
